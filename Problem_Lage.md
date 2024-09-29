@@ -15,5 +15,3 @@
 **Vorschlag zur Lösung:**
 - Es wäre sinnvoll, die Bedingungen im Code, die für das Schreiben der Gruppen verantwortlich sind, zu überprüfen. Es sollte sichergestellt werden, dass auch Gruppen, die optionale Werte wie `min_amount` oder `max_amount` nicht besitzen, korrekt verarbeitet und gespeichert werden.
 - Zusätzlich wäre es hilfreich, das Speicherhandling zu überprüfen, insbesondere wenn große Datenmengen verarbeitet werden. Es könnte sinnvoll sein, zusätzliche Debug-Logs einzufügen, um zu erkennen, wo der Datenverarbeitungsprozess möglicherweise unterbrochen wird.
-
----
