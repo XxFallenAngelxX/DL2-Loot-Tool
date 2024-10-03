@@ -1,209 +1,169 @@
+import re
 import os
 import json
-import re
-import time  # Zeitmodul für Logging
-import subprocess  # Zum Öffnen der Datei im Standard-Editor
-from colorama import Fore, Style, init  # Farben und Style für Terminal
+import time
+from colorama import Fore, Style, init
 
-# Initiiere colorama für plattformübergreifende Farbausgabe
+# Initialize colorama for cross-platform colored output
 init(autoreset=True)
 
-# Root-Verzeichnis als aktuelles Arbeitsverzeichnis festlegen
 ROOT_DIR = os.getcwd()
 LOG_DIR = os.path.join(ROOT_DIR, "logs")
-DB_DIR = os.path.join(ROOT_DIR, "DB")  # DB-Verzeichnis für default.loot
-CONFIG_DIR = os.path.join(ROOT_DIR, "Config")  # Config-Verzeichnis für loot_config.json
+DB_DIR = os.path.join(ROOT_DIR, "DB")
+CONFIG_DIR = os.path.join(ROOT_DIR, "Config")
 
-# Sicherstellen, dass die Verzeichnisse existieren
+# Ensure directories exist
 for directory in [LOG_DIR, CONFIG_DIR]:
     if not os.path.exists(directory):
         os.makedirs(directory)
 
-# Funktion für Backend-Logging - mit zusätzlichen Infos
-def log_message_backend(nachricht, level="INFO", extra_info=None):
+# Logging function with added details
+def log_message_backend(message, level="INFO", extra_info=None):
     log_file_path = os.path.join(LOG_DIR, "backend_log.txt")
-    debug_log_file_path = os.path.join(LOG_DIR, "debug_log.txt")  # Separate Debug-Log-Datei
     timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
     
-    # Zusätzliche Info in den Log-Eintrag aufnehmen, falls vorhanden
     extra_details = f" | Details: {extra_info}" if extra_info else ""
-    log_entry = f"[{level}] {timestamp} - {nachricht}{extra_details}\n"
+    log_entry = f"[{level}] {timestamp} - {message}{extra_details}\n"
     
     try:
-        if level == "DEBUG":
-            # Schreibe DEBUG-Nachrichten in die Debug-Log-Datei
-            with open(debug_log_file_path, "a") as debug_log_file:
-                debug_log_file.write(log_entry)
-        else:
-            # Schreibe andere Nachrichten in die allgemeine Log-Datei
-            with open(log_file_path, "a") as log_file:
-                log_file.write(log_entry)
+        with open(log_file_path, "a") as log_file:
+            log_file.write(log_entry)
                 
-            # Ausgabe in der Konsole, wenn es kein DEBUG-Level ist
-            if level == "ERROR":
-                print(f"{Fore.RED}{log_entry.strip()}")
-            elif level == "WARNING":
-                print(f"{Fore.YELLOW}{log_entry.strip()}")
-            else:
-                print(f"{Fore.GREEN}{log_entry.strip()}")
+        if level == "ERROR":
+            print(f"{Fore.RED}{log_entry.strip()}")
+        elif level == "WARNING":
+            print(f"{Fore.YELLOW}{log_entry.strip()}")
+        else:
+            print(f"{Fore.GREEN}{log_entry.strip()}")
                 
     except Exception as e:
-        print(f"{Fore.RED}Logging-Fehler (Backend): {str(e)}")
+        print(f"{Fore.RED}Logging error: {str(e)}")
 
-# Funktion zum Extrahieren von Loot-Daten aus default.loot mit detailliertem Logging
-def extract_loot_data_from_default(file_path):
-    log_message_backend(f"Lese Datei {file_path}", level="INFO")
-    # Datei-Inhalt laden
-    with open(file_path, 'r', encoding='utf-8') as file:
-        content = file.read()
-    
-    # LootedObject-Gruppen extrahieren
-    loot_groups = re.findall(r'LootedObject\("(.+?)"\).*?\{(.*?)\}', content, re.DOTALL)
-    
-    parsed_loot_data = {}
-    log_message_backend(f"Anzahl der Loot-Gruppen: {len(loot_groups)}", level="INFO")
-    
-    # Jede Gruppe verarbeiten
-    for group in loot_groups:
-        looted_object = group[0]  # Name der Loot-Gruppe
-        group_content = group[1]  # Inhalt der Gruppe
-        
-        # Alle 'use'-Einträge extrahieren
-        uses = re.findall(r'use (\w+)\(weight = ([0-9.]+)(?:, min_amount = (\d+), max_amount = (\d+))?\);', group_content)
-        
-        # Initialize list for this group if not present
-        if looted_object not in parsed_loot_data:
-            parsed_loot_data[looted_object] = []
-        
-        for use_group, weight, min_amount, max_amount in uses:
-            entry = {
-                "use_group": use_group,
-                "weight": float(weight),
-            }
-            # min/max nur hinzufügen, wenn sie vorhanden sind
-            if min_amount and max_amount:
-                entry["min_amount"] = int(min_amount)
-                entry["max_amount"] = int(max_amount)
-            
-            parsed_loot_data[looted_object].append(entry)
-            
-            # Logging debug for each 'use' entry extracted
-            log_message_backend(f"Extrahierter use-Eintrag", level="DEBUG", extra_info=f"Gruppe: {looted_object}, Eintrag: {use_group}, Gewicht: {weight}")
-    
-    log_message_backend(f"Erfolgreich Loot-Daten extrahiert.", level="INFO")
-    return parsed_loot_data
+# Remove comments
+def remove_comments(content):
+    return re.sub(r'//.*', '', content)
 
-# Funktion zur Initialisierung der Config-Datei mit zusätzlichen Log-Nachrichten
+# Function to extract and tag loot data, focusing on individual "use" entries
+def extract_loot_data_with_tags(file_path):
+    log_message_backend(f"Reading file {file_path}", level="INFO")
+    if not os.path.exists(file_path):
+        log_message_backend(f"File {file_path} not found.", level="ERROR")
+        return []
+
+    try:
+        with open(file_path, 'r', encoding='utf-8') as file:
+            content = file.read()
+        log_message_backend(f"File successfully read, size: {len(content)} characters", level="INFO")
+    except Exception as e:
+        log_message_backend(f"Error reading file: {str(e)}", level="ERROR")
+        return []
+
+    if not content.strip():
+        log_message_backend(f"File {file_path} is empty.", level="ERROR")
+        return []
+
+    try:
+        # Remove comments before parsing
+        content = remove_comments(content)
+
+        # Regex to extract LootedObjects and their "use" blocks
+        loot_pattern = r'LootedObject\("(.+?)"\)\s*\{(.*?)\}'
+        # Regex for use entries with weight, min_amount, and max_amount
+        use_pattern_full = r'use\s+(.+?)\s*\(weight\s*=\s*([0-9.]+),\s*min_amount\s*=\s*(\d+),\s*max_amount\s*=\s*(\d+)\)'
+        # Regex for simple use entries with only weight
+        use_pattern_simple = r'use\s+(.+?)\s*\(weight\s*=\s*([0-9.]+)\)'
+
+        loot_groups = re.findall(loot_pattern, content, re.DOTALL)
+        loot_data = []
+
+        # Auto-tagging based on use items (specific to item types, e.g., "WeaponMod")
+        def assign_tag(item):
+            if "WeaponMod" in item:
+                return "weapon_mod"
+            elif "Dismantle" in item:
+                return "crafting"
+            elif "Empty" in item:
+                return "neutral"
+            elif "Unique" in item or "Legendary" in item:
+                return "high_value"
+            else:
+                return "default"
+
+        for loot_name, loot_content in loot_groups:
+            uses_full = re.findall(use_pattern_full, loot_content)
+            uses_simple = re.findall(use_pattern_simple, loot_content)
+
+            use_entries = []
+            for item, weight, min_amount, max_amount in uses_full:
+                use_entries.append({
+                    "item": item.strip(),
+                    "weight": float(weight),
+                    "min_amount": int(min_amount),
+                    "max_amount": int(max_amount),
+                    "tag": assign_tag(item)  # Tag assigned based on the item name
+                })
+            for item, weight in uses_simple:
+                use_entries.append({
+                    "item": item.strip(),
+                    "weight": float(weight),
+                    "min_amount": None,
+                    "max_amount": None,
+                    "tag": assign_tag(item)  # Tag assigned based on the item name
+                })
+
+            # Check if the LootedObject and its content are properly closed, otherwise flag for review
+            if "}" not in loot_content or len(loot_content.strip()) < 5:
+                log_message_backend(f"Incomplete or malformed LootedObject detected: {loot_name}. Review required.", level="WARNING")
+
+            loot_data.append({
+                "LootedObject": loot_name,
+                "use": use_entries
+            })
+
+        log_message_backend(f"Extracted {len(loot_data)} loot groups", level="INFO")
+        if loot_data:
+            log_message_backend(f"First loot group: {loot_data[0]}", level="DEBUG")
+        return loot_data
+    except Exception as e:
+        log_message_backend(f"Error extracting loot groups: {str(e)}", level="ERROR")
+        return []
+
+# Function to initialize config file (only if it doesn't exist)
 def initialize_config(loot_data, config_file_path):
-    if not os.path.exists(config_file_path):
-        try:
-            with open(config_file_path, 'w', encoding='utf-8') as file:
-                json.dump(loot_data, file, indent=4)
-            log_message_backend(f"Config-Datei '{config_file_path}' erstellt.", level="INFO")
-            print(f"{Fore.GREEN}Die Config-Datei wurde erfolgreich erstellt und gespeichert.")
-        except Exception as e:
-            log_message_backend(f"Fehler beim Erstellen der Config-Datei", level="ERROR", extra_info=str(e))
-    else:
-        log_message_backend(f"Config-Datei '{config_file_path}' existiert bereits.", level="INFO")
-        print(f"{Fore.YELLOW}Die Config-Datei existiert bereits.")
-
-# Funktion zum Laden der Konfigurationsdatei mit Logging-Infos
-def load_config(config_file_path):
     if os.path.exists(config_file_path):
-        try:
-            with open(config_file_path, 'r', encoding='utf-8') as file:
-                log_message_backend(f"Config-Datei '{config_file_path}' wird geladen.", level="INFO")
-                config_data = json.load(file)
-                log_message_backend(f"Config-Datei erfolgreich geladen", level="INFO", extra_info=f"Pfad: {config_file_path}")
-                return config_data
-        except Exception as e:
-            log_message_backend(f"Fehler beim Laden der Config-Datei", level="ERROR", extra_info=str(e))
-    else:
-        log_message_backend(f"Config-Datei '{config_file_path}' nicht gefunden.", level="ERROR")
-        return None
+        log_message_backend(f"Config file '{config_file_path}' already exists. No creation needed.", level="INFO")
+        return
 
-# Benutzerinteraktionsmenü mit ausführlicher Erklärung
-def display_menu():
-    print("\n==== Loot Modifier Tool ====")
-    print(f"{Fore.CYAN}{Style.BRIGHT}Willkommen beim Loot Modifier Tool!")
-    print(f"Dieses Tool ermöglicht es dir, Loot-Tabellen aus dem Spiel zu modifizieren und anzupassen.")
-    print(f"Du kannst die Min/Max-Werte und die Gewichte der Beute ändern und alles in einer Konfigurationsdatei speichern.")
-    print(f"Bitte wähle eine Option, um fortzufahren:\n")
-    
-    print(f"{Fore.CYAN}{Style.BRIGHT}1. Config-Datei im Editor öffnen")
-    print(f"{Fore.CYAN}{Style.BRIGHT}2. Min/Max-Werte anpassen (Ändere die Menge der Items, die fallen gelassen werden)")
-    print(f"{Fore.CYAN}{Style.BRIGHT}3. Gewicht anpassen (Passe die Wahrscheinlichkeit an, mit der Items fallen gelassen werden)")
-    print(f"{Fore.CYAN}{Style.BRIGHT}4. Änderungen speichern (Speichere alle deine Anpassungen in der Config-Datei)")
-    print(f"{Fore.CYAN}{Style.BRIGHT}5. Beenden (Verlasse das Tool)\n")
-    option = input(f"{Fore.YELLOW}Bitte wähle eine Option (1-5): ")
-    return option
-    
-import os
+    if not loot_data:
+        log_message_backend("No loot data available. Config file will not be created.", level="ERROR")
+        print("No loot data available.")
+        return
 
-def open_config_file(config_file_path):
-    # Prüfe, ob die Datei existiert
-    if os.path.exists(config_file_path):
-        try:
-            # Öffne die Datei mit der Standardanwendung des Systems
-            os.startfile(config_file_path)
-        except Exception as e:
-            print(f"Fehler beim Öffnen der Datei: {e}")
-    else:
-        print(f"Die Datei {config_file_path} existiert nicht.")
-  
-# Hauptprogramm mit erweiterten Begrüßungstexten und Erläuterungen
+    try:
+        with open(config_file_path, 'w', encoding='utf-8') as file:
+            json.dump(loot_data, file, indent=4)
+        log_message_backend(f"Config file '{config_file_path}' created.", level="INFO")
+        print(f"Config file successfully created: {config_file_path}")
+    except Exception as e:
+        log_message_backend(f"Error creating config file: {str(e)}", level="ERROR")
+        print(f"Error creating config file: {str(e)}")
+
+# Main program
 def main():
-    print(f"{Style.BRIGHT}{Fore.CYAN}Starte das Loot Modifier Tool...\n")
-    
-    print(f"{Fore.GREEN}Dieses Tool hilft dir, die Beute- und Loot-Systeme deines Spiels zu modifizieren.")
-    print(f"Durch die Anpassung von Loot-Daten kannst du die Balance des Spiels beeinflussen oder das Spielerlebnis optimieren.\n")
-    
-    # Pfad zur default.loot Datei (im DB-Ordner)
+    print(f"{Style.BRIGHT}{Fore.CYAN}Starting Loot Modifier Tool...\n")
+
     default_loot_file = os.path.join(DB_DIR, 'default.loot')
-    
-    # Pfad zur Konfigurationsdatei (im Config-Ordner)
     config_file_path = os.path.join(CONFIG_DIR, "loot_config.json")
+
+    log_message_backend("Starting loot data extraction", level="INFO")
+    loot_groups = extract_loot_data_with_tags(default_loot_file)
     
-    log_message_backend("Starte die Extraktion der Loot-Daten", level="INFO")
-    # Extrahiere die Loot-Daten aus der default.loot Datei
-    loot_data = extract_loot_data_from_default(default_loot_file)
+    if not loot_groups:
+        log_message_backend("No loot data extracted. Exiting.", level="ERROR")
+        return
     
-    log_message_backend("Initialisiere die Config-Datei", level="INFO")
-    # Initialisierung der Konfigurationsdatei, wenn sie fehlt
-    initialize_config(loot_data, config_file_path)
-    
-    log_message_backend("Lade die Loot-Daten von der Konfigurationsdatei", level="INFO")
-    # Laden der Loot-Daten (von der Konfigurationsdatei)
-    loaded_loot_data = load_config(config_file_path)
-    
-    if loaded_loot_data:
-        loot_data = loaded_loot_data
-        log_message_backend("Loot-Daten erfolgreich geladen.", level="INFO")
-    else:
-        log_message_backend("Fehler beim Laden der Loot-Daten.", level="ERROR")
-    
-    # Benutzerinteraktionsmenü
-    while True:
-        option = display_menu()
-        if option == '1':
-            log_message_backend("Benutzer hat gewählt: Config-Datei im Editor öffnen", level="INFO")
-            open_config_file(config_file_path)
-        elif option == '2':
-            log_message_backend("Benutzer hat gewählt: Min/Max-Werte anpassen", level="INFO")
-            modify_min_max(loot_data)  # Annahme: Diese Funktion existiert
-        elif option == '3':
-            log_message_backend("Benutzer hat gewählt: Gewicht anpassen", level="INFO")
-            modify_weight(loot_data)  # Annahme: Diese Funktion existiert
-        elif option == '4':
-            log_message_backend("Benutzer hat gewählt: Änderungen speichern", level="INFO")
-            save_all_groups_to_config(loot_data, config_file_path)
-        elif option == '5':
-            log_message_backend("Benutzer hat gewählt: Beenden", level="INFO")
-            print(f"{Fore.CYAN}Beenden.")
-            break
-        else:
-            log_message_backend("Ungültige Option gewählt", level="WARNING")
-            print(f"{Fore.RED}Ungültige Option. Bitte wähle erneut.")
+    log_message_backend("Initializing config file", level="INFO")
+    initialize_config(loot_groups, config_file_path)
 
 if __name__ == "__main__":
     main()
